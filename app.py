@@ -7,16 +7,16 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-def overlay_grid(image_bytes, grid_step_small=36, grid_step_large=355, opacity=128):
+def overlay_grid(image_bytes, grid_step_small=24, grid_step_large=118, opacity=160):
     """
     Накладывает двухуровневую сетку на изображение
     
     Параметры (для панели 290×218мм):
-    - grid_step_small: шаг мелкой сетки в пикселях (по умолчанию 36px = 5мм)
-    - grid_step_large: шаг крупной сетки в пикселях (по умолчанию 355px = 50мм)
-    - opacity: прозрачность линий (0-255, по умолчанию 128)
+    - grid_step_small: шаг мелкой сетки в пикселях (24px = ~10мм)
+    - grid_step_large: шаг крупной сетки в пикселях (118px = 50мм)
+    - opacity: прозрачность линий (0-255, по умолчанию 160 для лучшей видимости)
     
-    Масштаб: ~7.1 px/mm
+    Масштаб: ~2.36 px/mm
     """
     # Открываем изображение
     img = Image.open(io.BytesIO(image_bytes)).convert('RGBA')
@@ -26,9 +26,9 @@ def overlay_grid(image_bytes, grid_step_small=36, grid_step_large=355, opacity=1
     overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     
-    # Цвета линий (серый с прозрачностью)
-    color_small = (128, 128, 128, opacity // 2)  # Более прозрачная мелкая сетка
-    color_large = (100, 100, 100, opacity)  # Менее прозрачная крупная сетка
+    # Цвета линий (серый с хорошей видимостью)
+    color_small = (120, 120, 120, opacity // 2)  # Более прозрачная мелкая сетка
+    color_large = (80, 80, 80, opacity)  # Более темная крупная сетка
     
     # Рисуем мелкую сетку (вертикальные линии)
     for x in range(0, width, grid_step_small):
@@ -40,26 +40,31 @@ def overlay_grid(image_bytes, grid_step_small=36, grid_step_large=355, opacity=1
     
     # Рисуем крупную сетку (вертикальные линии)
     for x in range(0, width, grid_step_large):
-        draw.line([(x, 0), (x, height)], fill=color_large, width=2)
+        draw.line([(x, 0), (x, height)], fill=color_large, width=3)  # Толще для лучшей видимости
     
     # Рисуем крупную сетку (горизонтальные линии)
     for y in range(0, height, grid_step_large):
-        draw.line([(0, y), (width, y)], fill=color_large, width=2)
+        draw.line([(0, y), (width, y)], fill=color_large, width=3)
     
     # Добавляем подписи координат
     try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
     except:
         font = ImageFont.load_default()
     
     # Подписи по оси X (верх) - каждые 50мм
     for i, x in enumerate(range(0, width, grid_step_large)):
         label = f"{i * 50}mm"  # 0, 50, 100, 150...
+        # Черный фон для лучшей читаемости
+        bbox = draw.textbbox((x + 5, 5), label, font=font)
+        draw.rectangle(bbox, fill=(0, 0, 0, 180))
         draw.text((x + 5, 5), label, fill=(255, 255, 255, 255), font=font)
     
     # Подписи по оси Y (слева) - каждые 50мм
     for i, y in enumerate(range(0, height, grid_step_large)):
         label = f"{i * 50}mm"
+        bbox = draw.textbbox((5, y + 5), label, font=font)
+        draw.rectangle(bbox, fill=(0, 0, 0, 180))
         draw.text((5, y + 5), label, fill=(255, 255, 255, 255), font=font)
     
     # Объединяем слои
@@ -91,8 +96,8 @@ def mark_defects(image_bytes, defects):
     draw = ImageDraw.Draw(overlay)
     
     try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
-        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
+        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18)
     except:
         font = ImageFont.load_default()
         font_small = ImageFont.load_default()
@@ -104,32 +109,40 @@ def mark_defects(image_bytes, defects):
         temp = defect.get('temp', 0)
         
         # Радиус маркера (пропорционально размеру дефекта)
-        # Масштаб: 7.1 px/mm
-        radius = int(size * 7.1 / 2)  # Диаметр в мм -> радиус в пикселях
+        # Масштаб: 2.36 px/mm
+        radius = int(size * 2.36 / 2)  # Диаметр в мм -> радиус в пикселях
+        
+        # Минимальный радиус для видимости
+        if radius < 15:
+            radius = 15
         
         # Рисуем красный круг
         draw.ellipse(
             [(x - radius, y - radius), (x + radius, y + radius)],
             outline=(255, 0, 0, 255),
-            width=3
+            width=4
         )
         
         # Центральная точка
         draw.ellipse(
-            [(x - 3, y - 3), (x + 3, y + 3)],
+            [(x - 5, y - 5), (x + 5, y + 5)],
             fill=(255, 0, 0, 255)
         )
         
-        # Номер дефекта
+        # Номер дефекта с черным фоном
         label_num = f"#{i}"
-        draw.text((x - radius - 5, y - radius - 25), label_num, 
+        bbox = draw.textbbox((x - radius - 10, y - radius - 35), label_num, font=font)
+        draw.rectangle(bbox, fill=(0, 0, 0, 200))
+        draw.text((x - radius - 10, y - radius - 35), label_num, 
                  fill=(255, 0, 0, 255), font=font)
         
         # Информация о дефекте
         info = f"{size}mm"
         if temp:
             info += f" | {temp}°C"
-        draw.text((x - radius - 5, y + radius + 5), info, 
+        bbox = draw.textbbox((x - radius - 10, y + radius + 10), info, font=font_small)
+        draw.rectangle(bbox, fill=(0, 0, 0, 200))
+        draw.text((x - radius - 10, y + radius + 10), info, 
                  fill=(255, 255, 255, 255), font=font_small)
     
     # Объединяем
@@ -147,8 +160,9 @@ def mark_defects(image_bytes, defects):
 def home():
     return jsonify({
         "service": "Thermogram Processing API",
-        "version": "1.1",
-        "scale": "7.1 px/mm (for 290×218mm panel)",
+        "version": "1.2",
+        "scale": "2.36 px/mm (for 290×218mm panel)",
+        "grid": "Small: 24px (~10mm), Large: 118px (50mm)",
         "endpoints": {
             "/overlay-grid": "POST - Накладывает сетку на изображение",
             "/mark-defects": "POST - Наносит маркеры на дефекты",
@@ -185,13 +199,12 @@ def api_overlay_grid():
             image_bytes = request.data
         
         if not image_bytes:
-            return jsonify({"error": "No image provided. Send as 'image' file in form-data or 'image_base64' in JSON"}), 400
+            return jsonify({"error": "No image provided"}), 400
         
-        # Параметры сетки (для панели 290×218мм = ~2064×1544px)
-        # Масштаб: ~7.1 px/mm
-        grid_step_small = int(request.form.get('grid_step_small', 12)) if request.form else 12  # 5мм (5 × 2.4 = 12px)
-        grid_step_large = int(request.form.get('grid_step_large', 118)) if request.form else 118  # 50мм (50 × 2.37 = 118px)
-        opacity = int(request.form.get('opacity', 128)) if request.form else 128
+        # Параметры сетки
+        grid_step_small = int(request.form.get('grid_step_small', 24)) if request.form else 24
+        grid_step_large = int(request.form.get('grid_step_large', 118)) if request.form else 118
+        opacity = int(request.form.get('opacity', 160)) if request.form else 160
         
         # Обрабатываем
         result_bytes = overlay_grid(image_bytes, grid_step_small, grid_step_large, opacity)
