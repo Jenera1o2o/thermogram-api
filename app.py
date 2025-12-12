@@ -159,43 +159,43 @@ def health():
 @app.route('/overlay-grid', methods=['POST'])
 def api_overlay_grid():
     """
-    Принимает изображение в base64 или как файл
+    Принимает изображение как файл или base64
     Возвращает изображение с сеткой
     """
     try:
-        # Получаем изображение
-        if 'image' in request.files:
-            # Если файл загружен напрямую
+        image_bytes = None
+        
+        # Вариант 1: Файл в form-data
+        if request.files and 'image' in request.files:
             image_bytes = request.files['image'].read()
-        elif 'image_base64' in request.json:
-            # Если base64 в JSON
+        
+        # Вариант 2: Base64 в JSON
+        elif request.is_json and request.json and 'image_base64' in request.json:
             image_base64 = request.json['image_base64']
             image_bytes = base64.b64decode(image_base64)
-        else:
-            return jsonify({"error": "No image provided"}), 400
         
-        # Параметры сетки (можно передать в запросе)
-        grid_step_small = request.json.get('grid_step_small', 5) if request.json else 5
-        grid_step_large = request.json.get('grid_step_large', 50) if request.json else 50
-        opacity = request.json.get('opacity', 128) if request.json else 128
+        # Вариант 3: Raw binary в body
+        elif request.data and len(request.data) > 0:
+            image_bytes = request.data
+        
+        if not image_bytes:
+            return jsonify({"error": "No image provided. Send as 'image' file in form-data or 'image_base64' in JSON"}), 400
+        
+        # Параметры сетки
+        grid_step_small = int(request.form.get('grid_step_small', 5)) if request.form else 5
+        grid_step_large = int(request.form.get('grid_step_large', 50)) if request.form else 50
+        opacity = int(request.form.get('opacity', 128)) if request.form else 128
         
         # Обрабатываем
         result_bytes = overlay_grid(image_bytes, grid_step_small, grid_step_large, opacity)
         
-        # Возвращаем как base64 или файл
-        if request.args.get('format') == 'base64':
-            result_base64 = base64.b64encode(result_bytes).decode('utf-8')
-            return jsonify({
-                "success": True,
-                "image_base64": result_base64
-            })
-        else:
-            return send_file(
-                io.BytesIO(result_bytes),
-                mimetype='image/jpeg',
-                as_attachment=True,
-                download_name='grid_overlay.jpg'
-            )
+        # Возвращаем
+        return send_file(
+            io.BytesIO(result_bytes),
+            mimetype='image/jpeg',
+            as_attachment=False,
+            download_name='grid_overlay.jpg'
+        )
             
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -208,17 +208,28 @@ def api_mark_defects():
     Возвращает изображение с маркерами
     """
     try:
+        image_bytes = None
+        
         # Получаем изображение
-        if 'image' in request.files:
+        if request.files and 'image' in request.files:
             image_bytes = request.files['image'].read()
-        elif 'image_base64' in request.json:
+        elif request.is_json and request.json and 'image_base64' in request.json:
             image_base64 = request.json['image_base64']
             image_bytes = base64.b64decode(image_base64)
-        else:
+        elif request.data and len(request.data) > 0:
+            image_bytes = request.data
+        
+        if not image_bytes:
             return jsonify({"error": "No image provided"}), 400
         
         # Получаем список дефектов
-        defects = request.json.get('defects', []) if request.json else []
+        if request.is_json and request.json:
+            defects = request.json.get('defects', [])
+        elif request.form:
+            defects_str = request.form.get('defects', '[]')
+            defects = json.loads(defects_str)
+        else:
+            defects = []
         
         if not defects:
             return jsonify({"error": "No defects provided"}), 400
@@ -227,23 +238,18 @@ def api_mark_defects():
         result_bytes = mark_defects(image_bytes, defects)
         
         # Возвращаем
-        if request.args.get('format') == 'base64':
-            result_base64 = base64.b64encode(result_bytes).decode('utf-8')
-            return jsonify({
-                "success": True,
-                "image_base64": result_base64
-            })
-        else:
-            return send_file(
-                io.BytesIO(result_bytes),
-                mimetype='image/jpeg',
-                as_attachment=True,
-                download_name='marked_defects.jpg'
-            )
+        return send_file(
+            io.BytesIO(result_bytes),
+            mimetype='image/jpeg',
+            as_attachment=False,
+            download_name='marked_defects.jpg'
+        )
             
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+    import os
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
