@@ -7,14 +7,16 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-def overlay_grid(image_bytes, grid_step_small=5, grid_step_large=50, opacity=128):
+def overlay_grid(image_bytes, grid_step_small=36, grid_step_large=355, opacity=128):
     """
     Накладывает двухуровневую сетку на изображение
     
-    Параметры:
-    - grid_step_small: шаг мелкой сетки в пикселях (по умолчанию 5px = 0.5см)
-    - grid_step_large: шаг крупной сетки в пикселях (по умолчанию 50px = 5см)
+    Параметры (для панели 290×218мм):
+    - grid_step_small: шаг мелкой сетки в пикселях (по умолчанию 36px = 5мм)
+    - grid_step_large: шаг крупной сетки в пикселях (по умолчанию 355px = 50мм)
     - opacity: прозрачность линий (0-255, по умолчанию 128)
+    
+    Масштаб: ~7.1 px/mm
     """
     # Открываем изображение
     img = Image.open(io.BytesIO(image_bytes)).convert('RGBA')
@@ -50,15 +52,15 @@ def overlay_grid(image_bytes, grid_step_small=5, grid_step_large=50, opacity=128
     except:
         font = ImageFont.load_default()
     
-   # Подписи по оси X (верх) - каждые 50мм
-for i, x in enumerate(range(0, width, grid_step_large)):
-    label = f"{i * 50}mm"  # 0, 50, 100, 150...
-    draw.text((x + 5, 5), label, fill=(255, 255, 255, 255), font=font)
-
-# Подписи по оси Y (слева) - каждые 50мм
-for i, y in enumerate(range(0, height, grid_step_large)):
-    label = f"{i * 50}mm"
-    draw.text((5, y + 5), label, fill=(255, 255, 255, 255), font=font)
+    # Подписи по оси X (верх) - каждые 50мм
+    for i, x in enumerate(range(0, width, grid_step_large)):
+        label = f"{i * 50}mm"  # 0, 50, 100, 150...
+        draw.text((x + 5, 5), label, fill=(255, 255, 255, 255), font=font)
+    
+    # Подписи по оси Y (слева) - каждые 50мм
+    for i, y in enumerate(range(0, height, grid_step_large)):
+        label = f"{i * 50}mm"
+        draw.text((5, y + 5), label, fill=(255, 255, 255, 255), font=font)
     
     # Объединяем слои
     img = Image.alpha_composite(img, overlay)
@@ -96,13 +98,14 @@ def mark_defects(image_bytes, defects):
         font_small = ImageFont.load_default()
     
     for i, defect in enumerate(defects, 1):
-        x = defect.get('x', 0)
-        y = defect.get('y', 0)
-        size = defect.get('size', 10)
+        x = int(defect.get('x', 0))
+        y = int(defect.get('y', 0))
+        size = float(defect.get('size', 10))
         temp = defect.get('temp', 0)
         
         # Радиус маркера (пропорционально размеру дефекта)
-        radius = int(size * 2)
+        # Масштаб: 7.1 px/mm
+        radius = int(size * 7.1 / 2)  # Диаметр в мм -> радиус в пикселях
         
         # Рисуем красный круг
         draw.ellipse(
@@ -123,7 +126,9 @@ def mark_defects(image_bytes, defects):
                  fill=(255, 0, 0, 255), font=font)
         
         # Информация о дефекте
-        info = f"{size}mm | {temp}°C"
+        info = f"{size}mm"
+        if temp:
+            info += f" | {temp}°C"
         draw.text((x - radius - 5, y + radius + 5), info, 
                  fill=(255, 255, 255, 255), font=font_small)
     
@@ -142,7 +147,8 @@ def mark_defects(image_bytes, defects):
 def home():
     return jsonify({
         "service": "Thermogram Processing API",
-        "version": "1.0",
+        "version": "1.1",
+        "scale": "7.1 px/mm (for 290×218mm panel)",
         "endpoints": {
             "/overlay-grid": "POST - Накладывает сетку на изображение",
             "/mark-defects": "POST - Наносит маркеры на дефекты",
@@ -181,7 +187,7 @@ def api_overlay_grid():
         if not image_bytes:
             return jsonify({"error": "No image provided. Send as 'image' file in form-data or 'image_base64' in JSON"}), 400
         
-       # Параметры сетки (для панели 290×218мм = 2064×1544px)
+        # Параметры сетки (для панели 290×218мм = ~2064×1544px)
         # Масштаб: ~7.1 px/mm
         grid_step_small = int(request.form.get('grid_step_small', 36)) if request.form else 36  # 5мм
         grid_step_large = int(request.form.get('grid_step_large', 355)) if request.form else 355  # 50мм
@@ -199,7 +205,7 @@ def api_overlay_grid():
         )
             
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "type": str(type(e).__name__)}), 500
 
 
 @app.route('/mark-defects', methods=['POST'])
@@ -247,7 +253,7 @@ def api_mark_defects():
         )
             
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "type": str(type(e).__name__)}), 500
 
 
 if __name__ == '__main__':
