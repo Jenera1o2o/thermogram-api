@@ -50,15 +50,15 @@ def overlay_grid(image_bytes, grid_step_small=5, grid_step_large=50, opacity=128
     except:
         font = ImageFont.load_default()
     
-    # Подписи по оси X (верх)
-    for x in range(0, width, grid_step_large):
-        label = f"{x // 10}mm"  # Переводим пиксели в мм (10px = 1mm примерно)
-        draw.text((x + 5, 5), label, fill=(255, 255, 255, 255), font=font)
-    
-    # Подписи по оси Y (слева)
-    for y in range(0, height, grid_step_large):
-        label = f"{y // 10}mm"
-        draw.text((5, y + 5), label, fill=(255, 255, 255, 255), font=font)
+   # Подписи по оси X (верх) - каждые 50мм
+for i, x in enumerate(range(0, width, grid_step_large)):
+    label = f"{i * 50}mm"  # 0, 50, 100, 150...
+    draw.text((x + 5, 5), label, fill=(255, 255, 255, 255), font=font)
+
+# Подписи по оси Y (слева) - каждые 50мм
+for i, y in enumerate(range(0, height, grid_step_large)):
+    label = f"{i * 50}mm"
+    draw.text((5, y + 5), label, fill=(255, 255, 255, 255), font=font)
     
     # Объединяем слои
     img = Image.alpha_composite(img, overlay)
@@ -181,9 +181,10 @@ def api_overlay_grid():
         if not image_bytes:
             return jsonify({"error": "No image provided. Send as 'image' file in form-data or 'image_base64' in JSON"}), 400
         
-        # Параметры сетки
-        grid_step_small = int(request.form.get('grid_step_small', 5)) if request.form else 5
-        grid_step_large = int(request.form.get('grid_step_large', 50)) if request.form else 50
+       # Параметры сетки (для панели 290×218мм = 2064×1544px)
+        # Масштаб: ~7.1 px/mm
+        grid_step_small = int(request.form.get('grid_step_small', 36)) if request.form else 36  # 5мм
+        grid_step_large = int(request.form.get('grid_step_large', 355)) if request.form else 355  # 50мм
         opacity = int(request.form.get('opacity', 128)) if request.form else 128
         
         # Обрабатываем
