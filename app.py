@@ -53,16 +53,19 @@ def overlay_grid(image_bytes, grid_step_small=24, grid_step_large=118, opacity=1
         font = ImageFont.load_default()
     
     # Подписи по оси X (верх) - каждые 50мм
+    # Подписи по оси X - пропорционально реальному размеру панели (290мм)
+    step_mm_x = 290 / (width / grid_step_large)  # Реальный шаг в мм
     for i, x in enumerate(range(0, width, grid_step_large)):
-        label = f"{i * 50}mm"  # 0, 50, 100, 150...
+    label = f"{int(i * step_mm_x)}mm"
         # Черный фон для лучшей читаемости
         bbox = draw.textbbox((x + 5, 5), label, font=font)
         draw.rectangle(bbox, fill=(0, 0, 0, 180))
         draw.text((x + 5, 5), label, fill=(255, 255, 255, 255), font=font)
     
-    # Подписи по оси Y (слева) - каждые 50мм
+    # Подписи по оси Y - пропорционально реальному размеру панели (218мм)
+    step_mm_y = 218 / (height / grid_step_large)  # Реальный шаг в мм
     for i, y in enumerate(range(0, height, grid_step_large)):
-        label = f"{i * 50}mm"
+    label = f"{int(i * step_mm_y)}mm"
         bbox = draw.textbbox((5, y + 5), label, font=font)
         draw.rectangle(bbox, fill=(0, 0, 0, 180))
         draw.text((5, y + 5), label, fill=(255, 255, 255, 255), font=font)
