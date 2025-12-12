@@ -189,8 +189,8 @@ def api_overlay_grid():
         
         # Параметры сетки (для панели 290×218мм = ~2064×1544px)
         # Масштаб: ~7.1 px/mm
-        grid_step_small = int(request.form.get('grid_step_small', 36)) if request.form else 36  # 5мм
-        grid_step_large = int(request.form.get('grid_step_large', 355)) if request.form else 355  # 50мм
+        grid_step_small = int(request.form.get('grid_step_small', 12)) if request.form else 12  # 5мм (5 × 2.4 = 12px)
+        grid_step_large = int(request.form.get('grid_step_large', 118)) if request.form else 118  # 50мм (50 × 2.37 = 118px)
         opacity = int(request.form.get('opacity', 128)) if request.form else 128
         
         # Обрабатываем
