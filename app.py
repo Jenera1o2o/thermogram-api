@@ -229,7 +229,7 @@ def api_overlay_grid():
 @app.route('/detect-defects-opencv', methods=['POST'])
 def api_detect_defects_opencv():
     """
-    Детекция дефектов через компьютерное зрение OpenCV
+    Детекция дефектов через компьютерное зрение OpenCV (улучшенная версия)
     """
     try:
         # Получаем изображение
@@ -238,9 +238,11 @@ def api_detect_defects_opencv():
         else:
             return jsonify({"error": "No image provided"}), 400
         
-        # Параметры (можно настроить)
-        threshold_value = int(request.form.get('threshold', 90)) if request.form else 90
-        min_area = int(request.form.get('min_area', 150)) if request.form else 150
+        # Параметры (настроенные для термограмм)
+        threshold_value = int(request.form.get('threshold', 70)) if request.form else 70  # Понижен для лучшей детекции
+        min_area = int(request.form.get('min_area', 300)) if request.form else 300  # Повышен для фильтрации шума
+        max_area = int(request.form.get('max_area', 8000)) if request.form else 8000  # Максимальный размер дефекта
+        edge_margin = int(request.form.get('edge_margin', 50)) if request.form else 50  # Отступ от краев
         
         # Конвертируем в numpy array
         nparr = np.frombuffer(image_bytes, np.uint8)
@@ -249,19 +251,28 @@ def api_detect_defects_opencv():
         if img is None:
             return jsonify({"error": "Invalid image format"}), 400
         
+        height, width = img.shape[:2]
+        
         # Конвертируем в grayscale
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         
-        # Применяем размытие для уменьшения шума
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        # Применяем CLAHE для улучшения контраста
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
         
-        # Пороговая обработка для поиска ТЕМНЫХ областей (дефектов)
-        _, thresh = cv2.threshold(blurred, threshold_value, 255, cv2.THRESH_BINARY_INV)
+        # Применяем размытие
+        blurred = cv2.GaussianBlur(enhanced, (7, 7), 0)
         
-        # Морфологические операции для улучшения детекции
-        kernel = np.ones((7, 7), np.uint8)
-        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+        # Пороговая обработка (адаптивная)
+        thresh = cv2.adaptiveThreshold(
+            blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            cv2.THRESH_BINARY_INV, 21, 5
+        )
+        
+        # Морфологические операции
+        kernel = np.ones((5, 5), np.uint8)
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
         
         # Находим контуры
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -270,11 +281,11 @@ def api_detect_defects_opencv():
         for contour in contours:
             area = cv2.contourArea(contour)
             
-            # Фильтруем слишком маленькие области (шум)
-            if area < min_area:
+            # Фильтруем по размеру
+            if area < min_area or area > max_area:
                 continue
             
-            # Получаем центр масс
+            # Получаем центр и bbox
             M = cv2.moments(contour)
             if M["m00"] == 0:
                 continue
@@ -282,23 +293,49 @@ def api_detect_defects_opencv():
             cx = int(M["m10"] / M["m00"])
             cy = int(M["m01"] / M["m00"])
             
+            # ФИЛЬТР: Исключаем дефекты на краях изображения
+            if (cx < edge_margin or cx > width - edge_margin or 
+                cy < edge_margin or cy > height - edge_margin):
+                continue
+            
             # Вычисляем размер
             (x, y, w, h) = cv2.boundingRect(contour)
+            
+            # ФИЛЬТР: Исключаем слишком вытянутые объекты (артефакты)
+            aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 0
+            if aspect_ratio > 3:  # Слишком вытянутый объект
+                continue
+            
             diameter_px = max(w, h)
-            diameter_mm = round(diameter_px / 2.36, 1)  # Масштаб 2.36 px/mm
+            diameter_mm = round(diameter_px / 2.36, 1)
+            
+            # ФИЛЬТР: Разумные пределы размеров дефектов (от 5мм до 50мм)
+            if diameter_mm < 5 or diameter_mm > 50:
+                continue
             
             # Оценка серьезности
             if diameter_mm > 20:
                 severity = "high"
-            elif diameter_mm > 10:
+            elif diameter_mm > 12:
                 severity = "medium"
             else:
                 severity = "low"
             
-            # Вычисляем среднюю яркость области
+            # Вычисляем среднюю яркость
             mask = np.zeros(gray.shape, dtype=np.uint8)
             cv2.drawContours(mask, [contour], -1, 255, -1)
             mean_val = cv2.mean(gray, mask=mask)[0]
+            
+            # ФИЛЬТР: Дефекты должны быть темнее среднего
+            overall_mean = cv2.mean(gray)[0]
+            if mean_val > overall_mean * 0.9:  # Не достаточно темный
+                continue
+            
+            # Вычисляем циркулярность (насколько форма близка к кругу)
+            perimeter = cv2.arcLength(contour, True)
+            if perimeter == 0:
+                continue
+            circularity = 4 * np.pi * area / (perimeter * perimeter)
             
             defects.append({
                 "x": cx,
@@ -306,25 +343,28 @@ def api_detect_defects_opencv():
                 "size": diameter_mm,
                 "temp": 0,
                 "severity": severity,
-                "description": f"Дефект {diameter_mm}мм (яркость: {int(mean_val)})",
+                "description": f"Темное пятно {diameter_mm}мм",
                 "area_px": int(area),
-                "brightness": int(mean_val)
+                "brightness": int(mean_val),
+                "circularity": round(circularity, 2)
             })
         
-        # Сортируем по размеру (от большего к меньшему)
+        # Сортируем по размеру
         defects.sort(key=lambda d: d['size'], reverse=True)
         
         return jsonify({
             "defects": defects,
-            "image_width": img.shape[1],
-            "image_height": img.shape[0],
+            "image_width": width,
+            "image_height": height,
             "total_defects": len(defects),
-            "method": "opencv",
-            "summary": f"Обнаружено {len(defects)} дефектов методом компьютерного зрения",
-            "quality_assessment": "плохо" if len(defects) > 5 else ("удовлетворительно" if len(defects) > 2 else "хорошо"),
+            "method": "opencv_enhanced",
+            "summary": f"Обнаружено {len(defects)} дефектов",
+            "quality_assessment": "плохо" if len(defects) > 3 else ("удовлетворительно" if len(defects) > 1 else "отлично"),
             "parameters": {
                 "threshold": threshold_value,
-                "min_area": min_area
+                "min_area": min_area,
+                "max_area": max_area,
+                "edge_margin": edge_margin
             }
         })
         
